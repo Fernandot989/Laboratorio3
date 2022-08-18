@@ -1,2 +1,270 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+;******************************************************************
+;Universidad del Valle de Guatemala
+;IE2023 Programación de Microcontroladores
+;Autor: Fernando Donis
+;Compilador: PIC-AS (v2.36), MPLAB X IDE (v6.00)
+;Proyecto: Laboratorio 2
+;Hardware: PIC16F887
+;Creado: 07/08/2022
+;Última Modificación: 08/08/2022
+;******************************************************************
+PROCESSOR 16F887
+#include <xc.inc> 
+;**************************************************************
+;Palabra de configuración
+;**************************************************************
+ ;CONFIG1
+  CONFIG FOSC = INTRC_NOCLKOUT
+  CONFIG WDTE = OFF
+  CONFIG PWRTE = OFF
+  CONFIG MCLRE = OFF
+  CONFIG CP = OFF
+  CONFIG CPD = OFF
+  CONFIG BOREN = OFF
+  CONFIG IESO = OFF
+  CONFIG FCMEN = OFF
+  CONFIG LVP = OFF
+  
+ ;CONFIG2
+  CONFIG WRT=OFF
+  CONFIG BOR4V=BOR40V
+  
+tmr0rein macro	    ;ciclo de 20 mseg
+    movlw   178	    ;hasta 255 overflow
+    movwf   TMR0    ;mover w a f timer0
+    bcf	    T0IF    ;T0IF esta a 0
+    endm
+    
+UP	EQU 6
+DOWN	EQU 7
+;***************************************************************************************************************************************************************************************
+;Variables
+;**************************************************************************************************************************************************************************************
+
+  PSECT udata_bank0
+  contad:	DS 1
+  contad1:	DS 1
+  contad2:	DS 1
+  conta:	DS 2	;2 bytes
+    
+  PSECT udata_shr
+  wtempo:	DS 1
+  tempostatus:	DS 1
+    
+    
+;***************************************************************************************************************************************************************************************
+;Vector Reset
+;***************************************************************************************************************************************************************************************
+PSECT resVect, class = CODE, abs, delta = 2
+ORG 00h	    ;posicion 0
+ 
+resetVec:	    ;resetear a posicion 0
+    PAGESEL main    
+    goto main
+
+;***************************************************************************************************************************************************************************************
+;Vector de interrupción
+;***************************************************************************************************************************************************************************************
+PSECT intVect, class=CODE, abs, delta=2
+ORG 04h	    ;Posición de las interrupciones
+
+push:
+    movwf    wtempo	    ;se copia W temporal
+    swapf   STATUS, W	    ;para no tocar banderas
+    movwf   tempostatus	    ;mover valor en status a variable
+
+isr:
+    btfsc   RBIF	    ;si se activa bandera
+    call    intiocb	    ;llamar interrupcion PORB
+    btfsc   T0IF	    ;no cuando esta bandera 0 no salta
+    call    intt0	    ;llamar TMR0
+    
+pop:
+    swapf   tempostatus, W  ;se mueve a W
+    movwf   STATUS	    ;se mueve a status
+    swapf   wtempo, F	    ;swapf variable a si mismo
+    swapf   wtempo, W	    ;se rectifica W
+    retfie		    
+
+intt0:			    ;Interrupcion TMR0
+    tmr0rein		    ;20 msegundos
+    incf    conta	    ;aumentar var cuenta
+    movf    conta, W	    ;moverla para acumularla
+    sublw   50		    ;restar 50 a W
+    btfss   ZERO	    
+    goto    rett0	    ;si es cero se repite
+    clrf    conta	    ;1000 ms
+    call    disp	    ;llamar para aumentar d1
+    incf    PORTD	    ;aumenta contador de segundos
+    btfsc   PORTD, 4	    ;puerto D 4 bits
+    clrf    PORTD	    
+    call    cont10	    ;llamar subrutina del contador de 10 seg
+    call    disp10	    ;llamar subrutina del display de 10 seg
+
+rett0:
+    return
+    
+disp:
+    incf    contad	    ;incrementar contador d1
+    movf    contad, W	    ;mover contador a W
+    call    tab		    ;se llama a la tabla para convertir valores
+    movwf   PORTA	    ;mover el valor convertido al puerto A
+    return
+    
+cont10:
+    movlw   10		    ;mueve 10 al acumulador
+    subwf   PORTD, 0	    ;se hace resta de W con Puerto D
+    btfsc   STATUS, 2	   
+    clrf    PORTD	    ;limpiar puertoD 
+    return
+    
+disp10:
+    movf    contad, W	    ;mover contador de segundos del d1 a W
+    call    tab		    ;llamar tabla
+    movwf   PORTA	    ;mover W convertido a Puerto A
+    movf    contad, W	    ;mover de nuevo a W
+    sublw   10		    ;restar W
+    btfsc   ZERO	    ;si la resta resulta 0 llamar subrutina reindisp
+    call    reindisp	    ;subrutina para reiniciar d1
+    return
+    
+reindisp:
+    clrf    contad	    ;limpia d1
+    incf    contad2	    ;incrementa contador2
+    movf    contad2, W	    ;incrementa se mueve contador a W
+    call    tab		    ;convierte valor	    
+    movwf   PORTC	    ;mover W convertido a Puerto C
+    call    min		    ;llamar subrutina min
+    return
+
+min:
+    movf    contad2, W	    ;incrementa se mueve contador a w
+    call    tab
+    movwf   PORTC	    ;mover W convertido a Puerto C
+    movf    contad2, W	    ;incrementa se mueve contador a w
+    sublw   2		    ;resta el contador2 de d2
+    btfsc   ZERO	    ;si resta es 0 se llama subrutina
+    call    reindisp2
+    return
+    
+reindisp2:
+    clrf    contad2	    ;reinicia d2
+    movf    contad2, W	    ;se mueve contad2 a W 
+    call    tab		    
+    movwf   PORTC
+    return
+    
+intiocb:		    ;interrupcion de puerto b
+    banksel PORTB	    
+    btfss   PORTB, UP	    ;pin 6 del puerto b se incrementa
+    incf    PORTB
+    btfsc   PORTD, 4
+    clrf    PORTD
+    btfss   PORTB, DOWN	    ;pin 6 del puerto b se decrecer
+    decf    PORTB
+    bcf	    RBIF
+    return
+    
+;***************************************************************************************************************************************************************************************
+;Codigo Principal
+;***************************************************************************************************************************************************************************************
+PSECT code, delta=2, abs
+ORG 100h
+
+tab:
+    clrf    PCLATH
+    bsf	    PCLATH, 0	;PCLATH = 01
+    andlw   00001111B	;establecer todo mayor a 16 a 0
+    addwf   PCL		;Se suma PCLATH, PCL, W
+    retlw   00111111B	;regresa 0
+    retlw   00000110B	;1
+    retlw   01011011B	;2
+    retlw   01001111B	;3 etc
+    retlw   01100110B
+    retlw   01101101B
+    retlw   01111101B
+    retlw   00000111B
+    retlw   01111111B
+    retlw   01101111B
+    retlw   01110111B	;A
+    retlw   01111100B	;B
+    retlw   00111001B	;C etc
+    retlw   01011110B
+    retlw   01111001B
+    retlw   01110001B
+
+main:
+    call    confio
+    call    confrel
+    call    confioc
+    call    conftmr0
+    call    confint
+    banksel PORTA
+    
+loop:
+    call    disp10
+    goto    loop
+    
+confio:
+    banksel ANSEL	    ;banco 3
+    clrf    ANSEL	    ;Puerto A como
+    clrf    ANSELH	    ;Puerto B como
+    banksel TRISA	    ;banco 1
+    clrf    TRISA	    ;PORTA salida para d1
+    clrf    TRISC	    ;PORTC salida para d2
+    clrf    TRISD	    ;PORTC salida contador2
+    clrf    TRISB	    ;PORTB saldia contador
+    bsf	    TRISB, UP	    ;PINES 6 y 7 del puerto B como entradas
+    bsf	    TRISB, DOWN	    
+    bcf	    OPTION_REG, 7   ;Activar bits del puerto B pull up
+    bsf	    WPUB, UP	    ;pines 6 y 7 ocn resistencia pull up
+    bsf	    WPUB, DOWN	    
+    bcf	    WPUB, 0	    ;desactiva resistencia pull up
+    bcf	    WPUB, 1	    ;del 1 al 3 del PORTB para salidas 
+    bcf	    WPUB, 2	    
+    bcf	    WPUB, 3	    
+    banksel PORTA	    ;banco 0
+    clrf    PORTA	    ;limpear PORTA, PORTC, PORTD, PORTB
+    clrf    PORTC	    
+    clrf    PORTD
+    clrf    PORTB
+    return
+    
+confrel:
+    banksel OSCCON	    ;registro OSCCON para oscilador
+    bsf	    IRCF2	    ;4MHz
+    bsf	    IRCF1	    ;1
+    bcf	    IRCF0	    ;0
+    bsf	    SCS		    ;poner en 1 el bit
+    return
+    
+conftmr0:
+    banksel TRISA	    ;banco 1
+    bcf	    T0CS	    ;colocar reloj interno
+    bcf	    PSA		    ;asignar prescaler para modulo timer0
+    bsf	    PS2
+    bsf	    PS1
+    bsf	    PS0		    ;PS = 111 configurar razon de escala a 1>256
+    banksel PORTA
+    tmr0rein
+    return
+    
+confioc:
+    banksel TRISA	    ;banco 1
+    bsf	    IOCB, UP	    
+    bsf	    IOCB, DOWN	    
+    banksel PORTA	    
+    movf    PORTB, W	    ;al leer termina condicion de bits
+    bcf	    RBIF	    ;si no ha terminado la condicion 
+    return
+
+confint:
+    bsf	    GIE		    ;setear las interrupciones globales
+    bsf	    T0IE	    ;habilitar interrupcion tmr0 1
+    bcf	    T0IF	    ;limpiar bandera 1
+    bsf	    RBIE	    ;habilitar interrupcion de cambio de puerto
+    bcf	    RBIF	    ;limpiar bandera de interrupcion
+    return
+    
+end
+
